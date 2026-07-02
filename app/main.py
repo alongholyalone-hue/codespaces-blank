@@ -9,7 +9,7 @@ app = FastAPI(
         "An evidence-based document "
         "question-answering application."
     ),
-    version="0.2.0",
+    version="0.3.0",
 )
 
 app.include_router(documents_router)
@@ -21,7 +21,7 @@ def read_root() -> dict[str, str]:
 
     return {
         "name": "Academic Research Assistant",
-        "version": "0.2.0",
+        "version": "0.3.0",
     }
 
 

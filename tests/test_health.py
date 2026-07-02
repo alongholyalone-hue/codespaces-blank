@@ -18,4 +18,4 @@ def test_root_endpoint() -> None:
 
     assert response.status_code == 200
     assert response.json()["name"] == "Academic Research Assistant"
-    assert response.json()["version"] == "0.2.0"
+    assert response.json()["version"] == "0.3.0"
