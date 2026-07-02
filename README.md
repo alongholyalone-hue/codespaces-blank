@@ -244,10 +244,23 @@ The confidence values are model-ranking scores and should not be interpreted as 
 
 ## Evaluation
 
-A reproducible evaluation measures semantic retrieval, answer extraction,
-citation accuracy, and unsupported-question refusal behaviour.
+The system was evaluated using a reproducible, controlled four-page PDF
+containing eight answerable questions and two unsupported questions.
 
-See [evaluation/results.md](evaluation/results.md) for the complete results.
+| Metric | Result |
+|---|---:|
+| Retrieval Hit@3 | 100% |
+| Answer accuracy | 100% |
+| Citation accuracy | 100% |
+| Unsupported-question refusal accuracy | 100% |
+| Overall success rate | 100% |
+
+These results apply only to the controlled 10-question evaluation set and
+should not be interpreted as general real-world accuracy.
+
+See [evaluation/results.md](evaluation/results.md) for detailed results and
+[evaluation/run_evaluation.py](evaluation/run_evaluation.py) for the
+reproducible evaluation script.
 
 ## Purpose
 
