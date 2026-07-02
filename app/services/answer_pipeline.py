@@ -55,6 +55,68 @@ def is_explanatory_question(question: str) -> bool:
     )
 
 
+def build_explanatory_answer(
+    question: str,
+    candidate_results: list[SearchResult],
+    maximum_sentences: int = 3,
+    minimum_words: int = 5,
+) -> str:
+    """
+    Combine several relevant evidence sentences into an explanation.
+
+    Question echoes, duplicate sentences, questions, and very short
+    fragments are excluded.
+    """
+
+    if maximum_sentences <= 0:
+        raise ValueError(
+            "maximum_sentences must be greater than zero"
+        )
+
+    if minimum_words <= 0:
+        raise ValueError(
+            "minimum_words must be greater than zero"
+        )
+
+    selected_sentences: list[str] = []
+    seen_sentences: set[str] = set()
+
+    for result in candidate_results:
+        sentence = result.chunk.text.strip()
+
+        if not sentence:
+            continue
+
+        if is_question_echo(
+            question=question,
+            candidate=sentence,
+        ):
+            continue
+
+        # Exclude discussion questions contained in worksheets.
+        if sentence.endswith("?"):
+            continue
+
+        words = normalize_tokens(sentence)
+
+        # Reject vague fragments such as "in the water".
+        if len(words) < minimum_words:
+            continue
+
+        normalized_sentence = " ".join(words)
+
+        if normalized_sentence in seen_sentences:
+            continue
+
+        selected_sentences.append(sentence)
+        seen_sentences.add(normalized_sentence)
+
+        if len(selected_sentences) >= maximum_sentences:
+            break
+
+    return " ".join(selected_sentences)
+
+
 QUESTION_WORDS = {
     "what",
     "who",

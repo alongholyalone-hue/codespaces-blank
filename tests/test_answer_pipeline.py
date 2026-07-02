@@ -14,6 +14,7 @@ from app.services.answer_pipeline import (
     INSUFFICIENT_EVIDENCE_MESSAGE,
     clean_answer_text,
     is_question_echo,
+    build_explanatory_answer,
     is_uninformative_answer,
     is_explanatory_question,
     remove_leading_question_echo,
@@ -462,7 +463,7 @@ def test_low_cross_encoder_score_does_not_reject_valid_evidence(
     assert response.answer == "FastAPI"
     assert response.citation is not None
     assert response.citation.page_number == 4
-    
+
 
 @pytest.mark.parametrize(
     "question",
@@ -495,3 +496,142 @@ def test_factoid_questions_are_not_explanatory(
     question: str,
 ) -> None:
     assert is_explanatory_question(question) is False
+
+
+def test_build_explanatory_answer_combines_evidence() -> None:
+    results = [
+        create_search_result(
+            text=(
+                "Sharks mainly rely on their large oil-filled "
+                "liver to stay buoyant."
+            ),
+            page_number=1,
+            retrieval_score=0.92,
+        ),
+        create_search_result(
+            text=(
+                "Their lightweight cartilage also helps "
+                "them remain afloat."
+            ),
+            page_number=1,
+            retrieval_score=0.81,
+        ),
+        create_search_result(
+            text=(
+                "Their fins and tail help maintain buoyancy "
+                "while swimming."
+            ),
+            page_number=1,
+            retrieval_score=0.75,
+        ),
+    ]
+
+    answer = build_explanatory_answer(
+        question="How does a shark stay afloat?",
+        candidate_results=results,
+        maximum_sentences=3,
+    )
+
+    assert "oil-filled liver" in answer
+    assert "cartilage" in answer
+    assert "fins and tail" in answer
+
+
+def test_explanatory_answer_rejects_question_echo() -> None:
+    results = [
+        create_search_result(
+            text="How does a shark stay afloat?",
+            page_number=1,
+            retrieval_score=0.99,
+        ),
+        create_search_result(
+            text=(
+                "Sharks mainly rely on their large oil-filled "
+                "liver to stay buoyant."
+            ),
+            page_number=1,
+            retrieval_score=0.90,
+        ),
+    ]
+
+    answer = build_explanatory_answer(
+        question="How does a shark stay afloat?",
+        candidate_results=results,
+    )
+
+    assert answer == (
+        "Sharks mainly rely on their large oil-filled "
+        "liver to stay buoyant."
+    )
+
+
+def test_explanatory_answer_rejects_short_fragment() -> None:
+    results = [
+        create_search_result(
+            text="in the water",
+            page_number=1,
+            retrieval_score=0.95,
+        ),
+        create_search_result(
+            text=(
+                "Oil in the shark's liver is lighter than "
+                "water and supports buoyancy."
+            ),
+            page_number=1,
+            retrieval_score=0.85,
+        ),
+    ]
+
+    answer = build_explanatory_answer(
+        question="How does a shark stay afloat?",
+        candidate_results=results,
+    )
+
+    assert answer == (
+        "Oil in the shark's liver is lighter than "
+        "water and supports buoyancy."
+    )
+
+
+def test_explanatory_answer_removes_duplicates() -> None:
+    results = [
+        create_search_result(
+            text="A shark's oil-filled liver supports buoyancy.",
+            page_number=1,
+            retrieval_score=0.90,
+        ),
+        create_search_result(
+            text="A shark's oil-filled liver supports buoyancy.",
+            page_number=1,
+            retrieval_score=0.88,
+        ),
+    ]
+
+    answer = build_explanatory_answer(
+        question="How does a shark stay afloat?",
+        candidate_results=results,
+    )
+
+    assert answer.count("oil-filled liver") == 1
+
+
+@pytest.mark.parametrize(
+    ("maximum_sentences", "minimum_words"),
+    [
+        (0, 5),
+        (-1, 5),
+        (3, 0),
+        (3, -1),
+    ],
+)
+def test_invalid_explanatory_answer_settings(
+    maximum_sentences: int,
+    minimum_words: int,
+) -> None:
+    with pytest.raises(ValueError):
+        build_explanatory_answer(
+            question="How does this work?",
+            candidate_results=[],
+            maximum_sentences=maximum_sentences,
+            minimum_words=minimum_words,
+        )    
