@@ -1,10 +1,92 @@
 # Academic Research Assistant
 
-An evidence-based AI application that answers questions from uploaded academic PDFs using semantic retrieval, local extractive question answering, and page-level citations.
+![Tests](https://github.com/alongholyalone-hue/academic-research-assistant/actions/workflows/tests.yml/badge.svg)
+
+A local, evidence-grounded PDF question-answering system built with Python,
+FastAPI, Streamlit, sentence embeddings, cross-encoder reranking, and
+transformer-based question answering.
+
+Unlike a basic chatbot wrapper, the application processes document structure,
+retrieves supporting evidence, distinguishes factual from explanatory questions,
+and returns page-level citations without requiring a paid language-model API.
 
 ![Academic Research Assistant interface](assets/demo-v2.png)
 
 ![Tests](https://github.com/alongholyalone-hue/academic-research-assistant/actions/workflows/tests.yml/badge.svg)
+
+## Technical Highlights
+
+- Layout-aware PDF extraction using PyMuPDF
+- Page, paragraph, and source metadata preservation
+- Paragraph-aware overlapping text chunking
+- Dense semantic retrieval with Sentence Transformers
+- Cross-encoder and lexical hybrid reranking
+- Local extractive question answering with Transformers
+- Multi-sentence evidence summaries for explanatory questions
+- Definition-question and insufficient-evidence safeguards
+- Page-level citations and supporting passages
+- FastAPI backend and Streamlit frontend
+- Automated testing and GitHub Actions continuous integration
+- Reproducible retrieval, answer, citation, and refusal evaluation
+
+## Evaluation
+
+The application achieved the following results on a reproducible, controlled
+10-question evaluation set:
+
+| Metric | Result |
+|---|---:|
+| Retrieval Hit@3 | 100% |
+| Answer accuracy | 100% |
+| Citation accuracy | 100% |
+| Unsupported-question refusal accuracy | 100% |
+| Overall success rate | 100% |
+
+These results apply only to the controlled evaluation set and are not presented
+as general real-world accuracy. Additional testing with visually complex PDFs
+revealed further limitations and guided subsequent improvements.
+
+## System Architecture
+
+```mermaid
+flowchart TD
+    A[Upload PDF] --> B[Layout-aware PDF extraction]
+    B --> C[Preserve page and paragraph metadata]
+    C --> D[Create paragraph-aware text chunks]
+
+    E[User question] --> F{Question type}
+    D --> G[Dense semantic retrieval]
+    E --> G
+
+    G --> H[Hybrid evidence reranking]
+    H --> I{Answer mode}
+
+    I -->|Factual question| J[Extractive QA model]
+    I -->|Explanatory question| K[Multi-sentence evidence summary]
+
+    J --> L[Answer validation]
+    K --> L
+
+    L -->|Evidence sufficient| M[Answer with page citation]
+    L -->|Evidence insufficient| N[Insufficient-evidence response]
+```
+
+## Failure-Driven Development
+
+The system was improved through testing on real PDFs rather than only controlled
+examples. During development, several failure modes were identified:
+
+- The QA model selected a repeated question word such as “How.”
+- Short but incomplete spans such as “in the water” were returned.
+- Sidebar text was mixed with the main article body.
+- Multi-column PDFs combined captions, headings, and unrelated sections.
+- Related content was sometimes mistaken for a direct definition.
+- Explanatory questions required multiple evidence sentences rather than one span.
+
+These failures led to the implementation of question-echo filtering,
+layout-aware extraction, paragraph-preserving chunking, heading detection,
+definition guards, hybrid reranking, and separate factual and explanatory
+answering modes.
 
 ## Overview
 
