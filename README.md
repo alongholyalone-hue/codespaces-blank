@@ -6,9 +6,9 @@ A local, evidence-grounded PDF question-answering system built with Python,
 FastAPI, Streamlit, sentence embeddings, cross-encoder reranking, and
 transformer-based question answering.
 
-Unlike a basic chatbot wrapper, the application processes document structure,
-retrieves supporting evidence, distinguishes factual from explanatory questions,
-and returns page-level citations without requiring a paid language-model API.
+Rather than relying on a single generative API call, the application implements
+its own document-processing, retrieval, reranking, answer-selection, validation,
+and citation pipeline using locally executed open-source models.
 
 ![Academic Research Assistant interface](assets/demo-v2.png)
 
@@ -31,8 +31,8 @@ and returns page-level citations without requiring a paid language-model API.
 
 ## Evaluation
 
-The application achieved the following results on a reproducible, controlled
-10-question evaluation set:
+The system was evaluated using a reproducible four-page controlled document
+containing eight answerable questions and two unsupported questions.
 
 | Metric | Result |
 |---|---:|
@@ -42,9 +42,17 @@ The application achieved the following results on a reproducible, controlled
 | Unsupported-question refusal accuracy | 100% |
 | Overall success rate | 100% |
 
-These results apply only to the controlled evaluation set and are not presented
-as general real-world accuracy. Additional testing with visually complex PDFs
-revealed further limitations and guided subsequent improvements.
+These results apply only to the controlled 10-question evaluation set and
+should not be interpreted as general real-world accuracy.
+
+Testing with more visually complex real-world PDFs exposed additional issues,
+including sidebar contamination, column mixing, question echoes, incomplete
+answer spans, and ambiguous definitions. Those findings guided later
+improvements to extraction, chunking, reranking, and answer validation.
+
+See [evaluation/results.md](evaluation/results.md) for detailed results and
+[evaluation/run_evaluation.py](evaluation/run_evaluation.py) for the
+reproducible evaluation script.
 
 ## System Architecture
 
@@ -96,19 +104,22 @@ The Academic Research Assistant allows a user to upload a PDF and ask a question
 
 The system runs with open-source models and does not require a paid language-model API.
 
-## Features
+## Core Capabilities
 
-- Upload text-based PDF documents
-- Extract text while preserving filenames and page numbers
-- Divide documents into overlapping searchable chunks
-- Generate sentence embeddings for document passages
-- Perform semantic search using cosine similarity
-- Extract direct answers using a local transformer model
+- Upload and process text-based academic PDFs
+- Extract layout-aware text blocks using PyMuPDF
+- Preserve filenames, page numbers, paragraphs, and citation metadata
+- Prevent unrelated columns and document sections from being merged
+- Retrieve evidence using sentence embeddings and cosine similarity
+- Rerank evidence using a cross-encoder and lexical-overlap scoring
+- Answer factual questions with a local extractive transformer
+- Build multi-sentence evidence summaries for explanatory questions
+- Detect repeated questions, headings, short fragments, and near-duplicates
+- Refuse unsupported or insufficiently grounded questions
 - Return page-level citations and supporting passages
-- Refuse questions when the available evidence is insufficient
-- Use the application through a Streamlit web interface
-- Access separate FastAPI search and answer endpoints
-- Validate behaviour with 47 automated tests
+- Provide FastAPI endpoints and a Streamlit web interface
+- Run automated tests through GitHub Actions
+- Perform reproducible retrieval, answer, citation, and refusal evaluation
 
 ## System Architecture
 
@@ -131,13 +142,23 @@ flowchart LR
 
 ## How It Works
 
-1. `pypdf` extracts text from each PDF page.
-2. The text chunker divides pages into overlapping passages while preserving citation metadata.
-3. `multi-qa-MiniLM-L6-cos-v1` converts passages and questions into normalized embedding vectors.
-4. The semantic-search service compares vectors and ranks the most relevant passages.
-5. `distilbert-base-cased-distilled-squad` extracts an answer directly from the retrieved evidence.
-6. Confidence thresholds determine whether the application should answer or return an insufficient-evidence message.
-7. The API returns the answer, retrieval score, answer score, source filename, page number, and supporting passage.
+1. **Layout-aware extraction:** PyMuPDF extracts text blocks while preserving filenames, page numbers, and paragraph boundaries.
+
+2. **Paragraph-aware chunking:** Text blocks are divided into searchable chunks without merging unrelated columns, captions, or document sections.
+
+3. **Dense retrieval:** `multi-qa-MiniLM-L6-cos-v1` converts document chunks and questions into embedding vectors.
+
+4. **Hybrid reranking:** A cross-encoder and lexical-overlap scoring reorder candidate evidence according to question relevance.
+
+5. **Question classification:** The system distinguishes short factual questions from explanatory questions.
+
+6. **Answer generation:**
+   - Factual questions use a local extractive question-answering model.
+   - Explanatory questions combine several relevant evidence sentences.
+
+7. **Answer validation:** Question echoes, headings, incomplete fragments, unsupported definitions, and low-confidence answers are filtered.
+
+8. **Citation output:** Accepted answers include the source filename, page number, relevance score, and supporting evidence.
 
 ## Technology Stack
 
@@ -148,14 +169,19 @@ flowchart LR
 - Hugging Face Transformers
 - Sentence Transformers
 - NumPy
-- pypdf
+- PyMuPDF
 - Pydantic
 - Pytest
 
 ## Project Structure
 
+## Project Structure
+
 ```text
 academic-research-assistant/
+├── .github/
+│   └── workflows/
+│       └── tests.yml
 ├── app/
 │   ├── api/
 │   │   └── documents.py
@@ -164,18 +190,35 @@ academic-research-assistant/
 │   │   ├── answer_pipeline.py
 │   │   ├── embedding_service.py
 │   │   ├── pdf_extractor.py
+│   │   ├── reranker.py
 │   │   ├── retrieval_pipeline.py
 │   │   ├── semantic_search.py
 │   │   └── text_chunker.py
+│   ├── __init__.py
 │   └── main.py
 ├── assets/
-│   └── demo.png
+│   └── demo-v2.png
+├── evaluation/
+│   ├── questions.json
+│   ├── results.json
+│   ├── results.md
+│   └── run_evaluation.py
 ├── frontend/
 │   └── streamlit_app.py
 ├── tests/
+│   ├── test_answer_extractor.py
+│   ├── test_answer_pipeline.py
+│   ├── test_document_api.py
+│   ├── test_embedding_service.py
+│   ├── test_health.py
+│   ├── test_pdf_extractor.py
+│   ├── test_reranker.py
+│   ├── test_retrieval_pipeline.py
+│   ├── test_semantic_search.py
+│   └── test_text_chunker.py
+├── .gitignore
 ├── README.md
 └── requirements.txt
-```
 
 ## Installation
 
@@ -277,7 +320,7 @@ Result:
 python -m pytest -q
 ```
 
-The project currently contains 47 automated tests covering:
+The project currently contains 102 automated tests covering:
 
 - API health endpoints
 - PDF extraction
@@ -305,24 +348,27 @@ The confidence values are model-ranking scores and should not be interpreted as 
 
 ## Limitations
 
-- Only text-based PDFs are supported; scanned PDFs require OCR.
-- The answer must appear explicitly in the retrieved text.
-- The extractive model cannot write long summaries or combine complex arguments across many pages.
-- Confidence thresholds are heuristic and require further evaluation.
-- Documents are processed again for each request.
-- The application does not currently store documents or conversation history permanently.
+- Scanned or image-only PDFs require OCR, which is not currently included.
+- Complex document layouts may still produce imperfect reading order.
+- Evidence summaries select and combine existing sentences rather than writing fully original explanations.
+- The extractive model works best when the answer appears explicitly in the document.
+- Confidence and relevance scores are ranking signals, not calibrated probabilities.
+- The controlled evaluation set is small and does not represent general real-world accuracy.
+- Documents are processed again for each request and are not stored permanently.
+- The application currently supports one uploaded document per request.
 
 ## Future Improvements
 
 - OCR support for scanned PDFs
-- Persistent document collections
+- Multi-document collections and persistent indexing
 - Vector-database integration
-- Multi-document search
-- Retrieval and answer-quality evaluation
-- Improved refusal calibration
-- Conversation history
-- Containerized deployment
-- Optional generative-model integration
+- Improved column and table understanding
+- Multiple citations for evidence summaries
+- Larger real-world evaluation datasets
+- Better score calibration
+- Conversation history and follow-up questions
+- Docker-based deployment
+- Optional local generative answer rewriting
 
 ## Evaluation
 
