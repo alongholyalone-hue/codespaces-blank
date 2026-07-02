@@ -73,20 +73,26 @@ The system runs with open-source models and does not require a paid language-mod
 ## System Architecture
 
 ```mermaid
-flowchart LR
-    A[Upload PDF] --> B[Extract text and page metadata]
-    B --> C[Create overlapping text chunks]
-    C --> D[Generate document embeddings]
+flowchart TD
+    A[Upload PDF] --> B[Layout-aware PDF extraction]
+    B --> C[Preserve page and paragraph metadata]
+    C --> D[Create paragraph-aware text chunks]
 
-    Q[User question] --> E[Generate query embedding]
+    E[User question] --> F{Question type}
+    D --> G[Dense semantic retrieval]
+    E --> G
 
-    D --> F[Semantic similarity search]
-    E --> F
+    G --> H[Hybrid evidence reranking]
+    H --> I{Answer mode}
 
-    F --> G[Retrieve relevant passages]
-    G --> H[Local extractive QA model]
-    H --> I[Direct answer]
-    H --> J[Filename, page and supporting passage]
+    I -->|Factual question| J[Extractive QA model]
+    I -->|Explanatory question| K[Multi-sentence evidence summary]
+
+    J --> L[Answer validation]
+    K --> L
+
+    L -->|Evidence sufficient| M[Answer with page citation]
+    L -->|Evidence insufficient| N[Insufficient-evidence response]
 ```
 
 ## How It Works
