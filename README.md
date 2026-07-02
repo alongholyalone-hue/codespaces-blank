@@ -175,8 +175,6 @@ flowchart LR
 
 ## Project Structure
 
-## Project Structure
-
 ```text
 academic-research-assistant/
 ├── .github/
