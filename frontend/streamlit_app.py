@@ -41,10 +41,15 @@ with st.form("document_question_form"):
     )
 
     top_k = st.slider(
-        "Number of passages to examine",
+        "Search depth",
         min_value=1,
         max_value=10,
         value=3,
+        help=(
+            "For explanatory questions, the application "
+            "automatically examines at least 10 passages "
+            "before selecting the final evidence."
+        ),
     )
 
     submitted = st.form_submit_button(
@@ -128,10 +133,18 @@ if submitted:
 
         score_column, retrieval_column = st.columns(2)
 
-        score_column.metric(
-            "Answer confidence",
-            f"{result['answer_confidence']:.3f}",
-        )
+        answer_confidence = result.get("answer_confidence")
+
+        if answer_confidence is None:
+            score_column.metric(
+                "Answer mode",
+                "Evidence summary",
+            )
+        else:
+            score_column.metric(
+                "Answer confidence",
+                f"{answer_confidence:.3f}",
+            )
 
         retrieval_column.metric(
             "Retrieval score",

@@ -7,6 +7,7 @@ from app.services.pdf_extractor import (
     ExtractedPage,
     extract_pdf_pages,
     normalize_whitespace,
+    select_main_text_blocks,
 )
 
 
@@ -69,3 +70,69 @@ def test_non_pdf_file_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Expected a PDF"):
         extract_pdf_pages(text_file)
+
+
+def test_labelled_left_sidebar_is_removed() -> None:
+    blocks = [
+        (
+            10.0,
+            100.0,
+            170.0,
+            700.0,
+            (
+                "PROGRAM GOALS\n"
+                "GRADES\n"
+                "MATERIALS\n"
+                "Cooking oil\n"
+                "Water"
+            ),
+        ),
+        (
+            190.0,
+            100.0,
+            590.0,
+            700.0,
+            (
+                "Sharks mainly rely on their large "
+                "oil-filled liver to stay buoyant."
+            ),
+        ),
+    ]
+
+    selected = select_main_text_blocks(
+        blocks=blocks,
+        page_width=600.0,
+    )
+
+    assert selected == [
+        (
+            "Sharks mainly rely on their large "
+            "oil-filled liver to stay buoyant."
+        )
+    ]
+
+
+def test_normal_left_text_is_kept_without_sidebar_labels() -> None:
+    blocks = [
+        (
+            10.0,
+            100.0,
+            170.0,
+            700.0,
+            "This is ordinary document text.",
+        ),
+        (
+            190.0,
+            100.0,
+            590.0,
+            700.0,
+            "This is another document section.",
+        ),
+    ]
+
+    selected = select_main_text_blocks(
+        blocks=blocks,
+        page_width=600.0,
+    )
+
+    assert len(selected) == 2

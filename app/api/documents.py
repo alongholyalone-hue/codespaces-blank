@@ -45,7 +45,7 @@ class DocumentAnswerResponse(BaseModel):
     chunk_count: int
     answered: bool
     answer: str
-    answer_confidence: float
+    answer_confidence: float | None
     retrieval_score: float
     citation: AnswerCitationResponse | None
 

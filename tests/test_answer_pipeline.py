@@ -12,6 +12,9 @@ from app.services.semantic_search import SearchResult
 from app.services.text_chunker import TextChunk
 from app.services.answer_pipeline import (
     INSUFFICIENT_EVIDENCE_MESSAGE,
+    is_heading_like,
+    contains_explicit_definition,
+    get_definition_target,
     clean_answer_text,
     is_question_echo,
     build_explanatory_answer,
@@ -635,3 +638,271 @@ def test_invalid_explanatory_answer_settings(
             maximum_sentences=maximum_sentences,
             minimum_words=minimum_words,
         )    
+
+
+def test_definition_target_is_extracted() -> None:
+    assert get_definition_target(
+        "What is a queen bee?"
+    ) == "queen bee"
+
+    assert get_definition_target(
+        "What are pheromones?"
+    ) == "pheromones"
+
+
+def test_explicit_definition_is_detected() -> None:
+    assert contains_explicit_definition(
+        target="pheromones",
+        sentence=(
+            "Pheromones are special chemicals released "
+            "to send messages."
+        ),
+    ) is True
+
+
+def test_related_sentence_is_not_a_definition() -> None:
+    assert contains_explicit_definition(
+        target="queen bee",
+        sentence=(
+            "These taps help determine roles such as "
+            "worker or queen."
+        ),
+    ) is False
+
+
+def test_missing_definition_causes_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = create_search_result(
+        text=(
+            "These taps help determine roles such as "
+            "worker or queen."
+        ),
+        page_number=2,
+        retrieval_score=0.88,
+    )
+
+    retrieval = RetrievalResponse(
+        query="What is a queen bee?",
+        source="bees.pdf",
+        page_count=2,
+        chunk_count=1,
+        results=[result],
+    )
+
+    monkeypatch.setattr(
+        answer_pipeline,
+        "retrieve_from_pdf",
+        lambda **kwargs: retrieval,
+    )
+
+    monkeypatch.setattr(
+        answer_pipeline,
+        "rerank_sentence_candidates",
+        lambda **kwargs: [result],
+    )
+
+    response = answer_pipeline.answer_from_pdf(
+        file_path=Path("bees.pdf"),
+        question="What is a queen bee?",
+    )
+
+    assert response.answered is False
+    assert response.answer == INSUFFICIENT_EVIDENCE_MESSAGE
+    assert response.citation is None
+
+
+def test_explanatory_question_uses_multiple_sentences(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results = [
+        create_search_result(
+            text=(
+                "Sharks mainly rely on their large oil-filled "
+                "liver to stay buoyant."
+            ),
+            page_number=1,
+            retrieval_score=0.94,
+        ),
+        create_search_result(
+            text=(
+                "Their lightweight cartilage also helps "
+                "them remain afloat."
+            ),
+            page_number=1,
+            retrieval_score=0.84,
+        ),
+        create_search_result(
+            text=(
+                "Their fins and tail help maintain buoyancy "
+                "while swimming."
+            ),
+            page_number=1,
+            retrieval_score=0.78,
+        ),
+    ]
+
+    retrieval = RetrievalResponse(
+        query="How does a shark stay afloat?",
+        source="sharks.pdf",
+        page_count=2,
+        chunk_count=3,
+        results=results,
+    )
+
+    monkeypatch.setattr(
+        answer_pipeline,
+        "retrieve_from_pdf",
+        lambda **kwargs: retrieval,
+    )
+
+    monkeypatch.setattr(
+        answer_pipeline,
+        "rerank_sentence_candidates",
+        lambda **kwargs: results,
+    )
+
+    def fail_extract_answer(**kwargs: object) -> None:
+        raise AssertionError(
+            "Extractive QA should not run for explanatory questions"
+        )
+
+    monkeypatch.setattr(
+        answer_pipeline,
+        "extract_answer",
+        fail_extract_answer,
+    )
+
+    response = answer_pipeline.answer_from_pdf(
+        file_path=Path("sharks.pdf"),
+        question="How does a shark stay afloat?",
+    )
+
+    assert response.answered is True
+    assert "oil-filled liver" in response.answer
+    assert "cartilage" in response.answer
+    assert "fins and tail" in response.answer
+    assert response.answer_confidence is None
+
+    assert response.citation is not None
+    assert response.citation.page_number == 1
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What is a principle of responsible AI?",
+        "What is an example of bee communication?",
+        "What is the role of pheromones?",
+        "What is a benefit of semantic search?",
+    ],
+)
+def test_attribute_questions_are_not_definitions(
+    question: str,
+) -> None:
+    assert get_definition_target(question) is None
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "HOW BEES COMMUNICATE",
+        "PHEROMONES",
+        "WAGGLE DANCE",
+        "ANTENNAE TAPPING",
+    ],
+)
+def test_document_headings_are_detected(
+    text: str,
+) -> None:
+    assert is_heading_like(text) is True
+
+
+def test_complete_sentence_is_not_a_heading() -> None:
+    assert is_heading_like(
+        "Bees use pheromones to send chemical messages."
+    ) is False
+
+
+def test_explanatory_answer_skips_heading() -> None:
+    results = [
+        create_search_result(
+            text="HOW BEES COMMUNICATE",
+            page_number=1,
+            retrieval_score=0.99,
+        ),
+        create_search_result(
+            text=(
+                "Bees use the waggle dance to communicate "
+                "the direction and distance to food."
+            ),
+            page_number=1,
+            retrieval_score=0.90,
+        ),
+    ]
+
+    answer = build_explanatory_answer(
+        question="How do bees communicate?",
+        candidate_results=results,
+    )
+
+    assert "HOW BEES COMMUNICATE" not in answer
+    assert "waggle dance" in answer
+
+def test_explanatory_question_uses_broader_retrieval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = create_search_result(
+        text=(
+            "Bees use pheromones, movement, and touch "
+            "to communicate with one another."
+        ),
+        page_number=1,
+        retrieval_score=0.90,
+    )
+
+    captured_values: dict[str, int] = {}
+
+    def fake_retrieve_from_pdf(
+        **kwargs: object,
+    ) -> RetrievalResponse:
+        captured_values["retrieval_top_k"] = int(
+            kwargs["top_k"]
+        )
+
+        return RetrievalResponse(
+            query="How do bees communicate?",
+            source="bees.pdf",
+            page_count=2,
+            chunk_count=1,
+            results=[result],
+        )
+
+    def fake_rerank_sentence_candidates(
+        question: str,
+        results: list[SearchResult],
+        top_k: int,
+    ) -> list[SearchResult]:
+        captured_values["reranking_top_k"] = top_k
+        return results
+
+    monkeypatch.setattr(
+        answer_pipeline,
+        "retrieve_from_pdf",
+        fake_retrieve_from_pdf,
+    )
+
+    monkeypatch.setattr(
+        answer_pipeline,
+        "rerank_sentence_candidates",
+        fake_rerank_sentence_candidates,
+    )
+
+    response = answer_pipeline.answer_from_pdf(
+        file_path=Path("bees.pdf"),
+        question="How do bees communicate?",
+        top_k=3,
+    )
+
+    assert response.answered is True
+    assert captured_values["retrieval_top_k"] == 10
+    assert captured_values["reranking_top_k"] == 10

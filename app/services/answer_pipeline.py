@@ -55,6 +55,144 @@ def is_explanatory_question(question: str) -> bool:
     )
 
 
+DEFINITION_QUESTION_PATTERNS = (
+    r"^what\s+(?:is|are)\s+(.+?)[?!.]*$",
+    r"^who\s+(?:is|are)\s+(.+?)[?!.]*$",
+    r"^define\s+(.+?)[?!.]*$",
+)
+
+
+NON_DEFINITION_QUESTION_PATTERNS = (
+    (
+        r"^what\s+(?:is|are)\s+(?:a|an|the)\s+"
+        r"(?:principle|example|benefit|cause|effect|purpose|role|"
+        r"feature|type|way|method|reason|advantage|disadvantage|"
+        r"part|component)\s+of\b"
+    ),
+    r"^what\s+(?:is|are)\s+one\s+of\b",
+)
+
+
+def get_definition_target(question: str) -> str | None:
+    """Extract the subject of a genuine definition question."""
+
+    cleaned_question = " ".join(
+        question.lower().strip().split()
+    )
+
+    if any(
+        re.match(pattern, cleaned_question)
+        for pattern in NON_DEFINITION_QUESTION_PATTERNS
+    ):
+        return None
+
+    for pattern in DEFINITION_QUESTION_PATTERNS:
+        match = re.match(pattern, cleaned_question)
+
+        if match is None:
+            continue
+
+        target = match.group(1).strip()
+
+        target = re.sub(
+            r"^(?:a|an|the)\s+",
+            "",
+            target,
+        )
+
+        return target or None
+
+    return None
+
+
+def contains_explicit_definition(
+    target: str,
+    sentence: str,
+) -> bool:
+    """
+    Check whether a sentence explicitly defines the requested subject.
+    """
+
+    cleaned_target = " ".join(
+        normalize_tokens(target)
+    )
+
+    cleaned_sentence = " ".join(
+        normalize_tokens(sentence)
+    )
+
+    if not cleaned_target or not cleaned_sentence:
+        return False
+
+    escaped_target = re.escape(cleaned_target)
+
+    definition_patterns = (
+        rf"\b{escaped_target}\b\s+(?:is|are)\b",
+        rf"\b{escaped_target}\b\s+(?:means|refer(?:s)? to)\b",
+        rf"\b{escaped_target}\b\s+(?:is|are)\s+"
+        rf"(?:a|an|the|one|any)\b",
+    )
+
+    return any(
+        re.search(pattern, cleaned_sentence)
+        for pattern in definition_patterns
+    )
+
+
+def sentence_similarity(
+    first_sentence: str,
+    second_sentence: str,
+) -> float:
+    """Measure token overlap between two sentences."""
+
+    first_tokens = set(normalize_tokens(first_sentence))
+    second_tokens = set(normalize_tokens(second_sentence))
+
+    if not first_tokens or not second_tokens:
+        return 0.0
+
+    intersection = first_tokens.intersection(second_tokens)
+    union = first_tokens.union(second_tokens)
+
+    return len(intersection) / len(union)
+
+
+def is_near_duplicate(
+    sentence: str,
+    selected_sentences: list[str],
+    threshold: float = 0.55,
+) -> bool:
+    """Detect sentences that substantially repeat selected evidence."""
+
+    return any(
+        sentence_similarity(sentence, selected) >= threshold
+        for selected in selected_sentences
+    )
+
+
+def is_heading_like(text: str) -> bool:
+    """Detect short titles and section headings."""
+
+    cleaned = text.strip()
+    words = normalize_tokens(cleaned)
+
+    if not cleaned or not words:
+        return True
+
+    # Examples: "HOW BEES COMMUNICATE", "PHEROMONES"
+    if cleaned.isupper() and len(words) <= 8:
+        return True
+
+    # Short text without sentence punctuation is likely a heading.
+    if (
+        len(words) <= 5
+        and not cleaned.endswith((".", "!", "?"))
+    ):
+        return True
+
+    return False
+
+
 def build_explanatory_answer(
     question: str,
     candidate_results: list[SearchResult],
@@ -86,6 +224,9 @@ def build_explanatory_answer(
 
         if not sentence:
             continue
+        
+        if is_heading_like(sentence):
+            continue
 
         if is_question_echo(
             question=question,
@@ -106,6 +247,12 @@ def build_explanatory_answer(
         normalized_sentence = " ".join(words)
 
         if normalized_sentence in seen_sentences:
+            continue
+
+        if is_near_duplicate(
+            sentence=sentence,
+            selected_sentences=selected_sentences,
+        ):
             continue
 
         selected_sentences.append(sentence)
@@ -321,7 +468,7 @@ def rerank_sentence_candidates(
     ]
 
     candidate_count = min(
-        max(top_k * 2, 3),
+        max(top_k * 4, 12),
         len(sentence_chunks),
     )
 
@@ -353,7 +500,7 @@ class DocumentAnswer:
     chunk_count: int
     answered: bool
     answer: str
-    answer_confidence: float
+    answer_confidence: float | None
     retrieval_score: float
     citation: AnswerCitation | None
 
@@ -363,7 +510,7 @@ def answer_from_pdf(
     question: str,
     top_k: int = 3,
     minimum_retrieval_score: float = 0.25,
-    minimum_answer_confidence: float = 0.10,
+    minimum_answer_confidence: float = 0.25,
 ) -> DocumentAnswer:
     """
     Retrieve relevant PDF passages and extract the best answer.
@@ -373,6 +520,16 @@ def answer_from_pdf(
     """
 
     cleaned_question = question.strip()
+
+    explanatory_mode = is_explanatory_question(
+        cleaned_question
+    )
+
+    retrieval_top_k = (
+        max(top_k, 10)
+        if explanatory_mode
+        else top_k
+    )
 
     if not cleaned_question:
         raise ValueError("Question cannot be empty")
@@ -390,7 +547,7 @@ def answer_from_pdf(
     retrieval = retrieve_from_pdf(
         file_path=file_path,
         query=cleaned_question,
-        top_k=top_k,
+        top_k=retrieval_top_k,
     )
 
     # Apply the semantic-retrieval threshold before reranking.
@@ -418,8 +575,102 @@ def answer_from_pdf(
     candidate_results = rerank_sentence_candidates(
         question=cleaned_question,
         results=eligible_results,
-        top_k=top_k,
+        top_k=retrieval_top_k,
     )
+
+    definition_target = get_definition_target(
+        cleaned_question
+    )
+
+    if definition_target is not None:
+        definition_results = [
+            result
+            for result in candidate_results
+            if contains_explicit_definition(
+                target=definition_target,
+                sentence=result.chunk.text,
+            )
+        ]
+
+        if not definition_results:
+            return DocumentAnswer(
+                query=retrieval.query,
+                source=retrieval.source,
+                page_count=retrieval.page_count,
+                chunk_count=retrieval.chunk_count,
+                answered=False,
+                answer=INSUFFICIENT_EVIDENCE_MESSAGE,
+                answer_confidence=0.0,
+                retrieval_score=0.0,
+                citation=None,
+            )
+
+        candidate_results = definition_results
+
+    if explanatory_mode:
+        if not candidate_results:
+            return DocumentAnswer(
+                query=retrieval.query,
+                source=retrieval.source,
+                page_count=retrieval.page_count,
+                chunk_count=retrieval.chunk_count,
+                answered=False,
+                answer=INSUFFICIENT_EVIDENCE_MESSAGE,
+                answer_confidence=None,
+                retrieval_score=0.0,
+                citation=None,
+            )
+
+        primary_result = candidate_results[0]
+
+        # Keep the explanation and its citation on one page.
+        same_page_candidates = [
+            result
+            for result in candidate_results
+            if (
+                result.chunk.source
+                == primary_result.chunk.source
+                and result.chunk.page_number
+                == primary_result.chunk.page_number
+            )
+        ]
+
+        explanatory_answer = build_explanatory_answer(
+            question=cleaned_question,
+            candidate_results=same_page_candidates,
+            maximum_sentences=3,
+        )
+
+        if not explanatory_answer:
+            return DocumentAnswer(
+                query=retrieval.query,
+                source=retrieval.source,
+                page_count=retrieval.page_count,
+                chunk_count=retrieval.chunk_count,
+                answered=False,
+                answer=INSUFFICIENT_EVIDENCE_MESSAGE,
+                answer_confidence=None,
+                retrieval_score=0.0,
+                citation=None,
+            )
+
+        return DocumentAnswer(
+            query=retrieval.query,
+            source=retrieval.source,
+            page_count=retrieval.page_count,
+            chunk_count=retrieval.chunk_count,
+            answered=True,
+            answer=explanatory_answer,
+            answer_confidence=None,
+            retrieval_score=primary_result.score,
+            citation=AnswerCitation(
+                text=explanatory_answer,
+                source=primary_result.chunk.source,
+                page_number=primary_result.chunk.page_number,
+                chunk_id=primary_result.chunk.chunk_id,
+                retrieval_score=primary_result.score,
+            ),
+        )
 
     best_result = None
     best_extracted_answer = None
