@@ -4,6 +4,8 @@ An evidence-based AI application that answers questions from uploaded academic P
 
 ![Academic Research Assistant interface](assets/demo.png)
 
+![Tests](https://github.com/alongholyalone-hue/academic-research-assistant/actions/workflows/tests.yml/badge.svg)
+
 ## Overview
 
 University students often work with long readings, lecture notes, and research papers. Finding a specific piece of information across these documents can be time-consuming.
