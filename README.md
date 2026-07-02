@@ -12,8 +12,6 @@ and citation pipeline using locally executed open-source models.
 
 ![Academic Research Assistant interface](assets/demo-v2.png)
 
-![Tests](https://github.com/alongholyalone-hue/academic-research-assistant/actions/workflows/tests.yml/badge.svg)
-
 ## Technical Highlights
 
 - Layout-aware PDF extraction using PyMuPDF
@@ -29,55 +27,6 @@ and citation pipeline using locally executed open-source models.
 - Automated testing and GitHub Actions continuous integration
 - Reproducible retrieval, answer, citation, and refusal evaluation
 
-## Evaluation
-
-The system was evaluated using a reproducible four-page controlled document
-containing eight answerable questions and two unsupported questions.
-
-| Metric | Result |
-|---|---:|
-| Retrieval Hit@3 | 100% |
-| Answer accuracy | 100% |
-| Citation accuracy | 100% |
-| Unsupported-question refusal accuracy | 100% |
-| Overall success rate | 100% |
-
-These results apply only to the controlled 10-question evaluation set and
-should not be interpreted as general real-world accuracy.
-
-Testing with more visually complex real-world PDFs exposed additional issues,
-including sidebar contamination, column mixing, question echoes, incomplete
-answer spans, and ambiguous definitions. Those findings guided later
-improvements to extraction, chunking, reranking, and answer validation.
-
-See [evaluation/results.md](evaluation/results.md) for detailed results and
-[evaluation/run_evaluation.py](evaluation/run_evaluation.py) for the
-reproducible evaluation script.
-
-## System Architecture
-
-```mermaid
-flowchart TD
-    A[Upload PDF] --> B[Layout-aware PDF extraction]
-    B --> C[Preserve page and paragraph metadata]
-    C --> D[Create paragraph-aware text chunks]
-
-    E[User question] --> F{Question type}
-    D --> G[Dense semantic retrieval]
-    E --> G
-
-    G --> H[Hybrid evidence reranking]
-    H --> I{Answer mode}
-
-    I -->|Factual question| J[Extractive QA model]
-    I -->|Explanatory question| K[Multi-sentence evidence summary]
-
-    J --> L[Answer validation]
-    K --> L
-
-    L -->|Evidence sufficient| M[Answer with page citation]
-    L -->|Evidence insufficient| N[Insufficient-evidence response]
-```
 
 ## Failure-Driven Development
 
@@ -284,34 +233,6 @@ Returns:
 - Source filename
 - Page number
 - Supporting passage
-
-## Example
-
-Question:
-
-```text
-What does one plus one equal?
-```
-
-Document passage:
-
-```text
-The document states that one plus one equals 2.
-```
-
-Result:
-
-```json
-{
-  "answered": true,
-  "answer": "2",
-  "citation": {
-    "source": "example.pdf",
-    "page_number": 1,
-    "text": "The document states that one plus one equals 2."
-  }
-}
-```
 
 ## Running the Tests
 
