@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from app.services.pdf_extractor import ExtractedPage
 
+import re
 
 @dataclass(frozen=True)
 class TextChunk:
@@ -14,64 +15,123 @@ class TextChunk:
     chunk_index: int
 
 
+def split_paragraphs(text: str) -> list[str]:
+    """
+    Split extracted page text into separate PDF text blocks.
+
+    PyMuPDF blocks are separated by blank lines. Internal line
+    breaks inside each block are converted into spaces.
+    """
+
+    raw_paragraphs = re.split(
+        r"\n\s*\n+",
+        text.strip(),
+    )
+
+    paragraphs: list[str] = []
+
+    for paragraph in raw_paragraphs:
+        cleaned = " ".join(paragraph.split())
+
+        if cleaned:
+            paragraphs.append(cleaned)
+
+    return paragraphs
+
+
+def chunk_paragraph(
+    paragraph: str,
+    chunk_size: int,
+    overlap: int,
+) -> list[str]:
+    """
+    Divide one paragraph into overlapping word-based chunks.
+
+    Overlap is applied only within the paragraph, never between
+    unrelated PDF blocks.
+    """
+
+    words = paragraph.split()
+
+    if not words:
+        return []
+
+    paragraph_chunks: list[str] = []
+    start_index = 0
+
+    while start_index < len(words):
+        end_index = min(
+            start_index + chunk_size,
+            len(words),
+        )
+
+        paragraph_chunks.append(
+            " ".join(words[start_index:end_index])
+        )
+
+        if end_index >= len(words):
+            break
+
+        start_index = end_index - overlap
+
+    return paragraph_chunks
+
+
 def chunk_pages(
     pages: list[ExtractedPage],
     chunk_size: int = 120,
     overlap: int = 30,
 ) -> list[TextChunk]:
     """
-    Divide extracted PDF pages into overlapping word-based chunks.
+    Convert extracted PDF pages into searchable text chunks.
 
-    Args:
-        pages: Pages returned by the PDF extraction service.
-        chunk_size: Maximum number of words in each chunk.
-        overlap: Number of words repeated between neighbouring chunks.
-
-    Returns:
-        A list of chunks containing text and citation metadata.
+    PDF block and paragraph boundaries are preserved so unrelated
+    captions, headings, columns, and body text are not merged.
     """
 
     if chunk_size <= 0:
-        raise ValueError("chunk_size must be greater than zero")
+        raise ValueError(
+            "chunk_size must be greater than zero"
+        )
 
     if overlap < 0:
-        raise ValueError("overlap cannot be negative")
+        raise ValueError(
+            "overlap cannot be negative"
+        )
 
     if overlap >= chunk_size:
-        raise ValueError("overlap must be smaller than chunk_size")
+        raise ValueError(
+            "overlap must be smaller than chunk_size"
+        )
 
     chunks: list[TextChunk] = []
 
     for page in pages:
-        words = page.text.split()
-
-        if not words:
-            continue
-
-        start = 0
+        paragraphs = split_paragraphs(page.text)
         chunk_index = 1
 
-        while start < len(words):
-            end = min(start + chunk_size, len(words))
-            chunk_text = " ".join(words[start:end])
-
-            chunks.append(
-                TextChunk(
-                    chunk_id=(
-                        f"{page.source}-page-{page.page_number}"
-                        f"-chunk-{chunk_index}"
-                    ),
-                    text=chunk_text,
-                    source=page.source,
-                    page_number=page.page_number,
-                    chunk_index=chunk_index,
-                )
+        for paragraph in paragraphs:
+            paragraph_chunks = chunk_paragraph(
+                paragraph=paragraph,
+                chunk_size=chunk_size,
+                overlap=overlap,
             )
 
-            if end == len(words):
-                break
+            for chunk_text in paragraph_chunks:
+                chunks.append(
+                    TextChunk(
+                        chunk_id=(
+                            f"{page.source}"
+                            f"-page-{page.page_number}"
+                            f"-chunk-{chunk_index}"
+                        ),
+                        text=chunk_text,
+                        source=page.source,
+                        page_number=page.page_number,
+                        chunk_index=chunk_index,
+                    )
+                )
 
-            start = end - overlap
-            chunk_index += 1
+                chunk_index += 1
 
     return chunks

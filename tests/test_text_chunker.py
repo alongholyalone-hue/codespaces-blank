@@ -1,7 +1,11 @@
 import pytest
 
 from app.services.pdf_extractor import ExtractedPage
-from app.services.text_chunker import TextChunk, chunk_pages
+from app.services.text_chunker import (
+    TextChunk,
+    chunk_pages,
+    split_paragraphs,
+)
 
 
 def test_chunk_pages_creates_overlapping_chunks() -> None:
@@ -103,6 +107,8 @@ def test_empty_pages_are_skipped() -> None:
         (10, 11),
     ],
 )
+
+
 def test_invalid_chunk_settings_raise_error(
     chunk_size: int,
     overlap: int,
@@ -119,3 +125,87 @@ def test_invalid_chunk_settings_raise_error(
             chunk_size=chunk_size,
             overlap=overlap,
         )
+
+        
+def test_split_paragraphs_preserves_pdf_blocks() -> None:
+    text = (
+        "Power in a scent: queen pheromones keep "
+        "the hive united.\n\n"
+        "PHEROMONES\n\n"
+        "Pheromones are special chemicals bees release "
+        "to send important messages."
+    )
+
+    paragraphs = split_paragraphs(text)
+
+    assert paragraphs == [
+        (
+            "Power in a scent: queen pheromones keep "
+            "the hive united."
+        ),
+        "PHEROMONES",
+        (
+            "Pheromones are special chemicals bees release "
+            "to send important messages."
+        ),
+    ]
+
+
+def test_chunks_do_not_cross_paragraph_boundaries() -> None:
+    page = ExtractedPage(
+        page_number=2,
+        source="bees.pdf",
+        text=(
+            "Queen pheromones signal the queen's presence.\n\n"
+            "ANTENNAE TAPPING\n\n"
+            "Bees tap antennae to exchange information."
+        ),
+    )
+
+    chunks = chunk_pages(
+        pages=[page],
+        chunk_size=100,
+        overlap=20,
+    )
+
+    assert len(chunks) == 3
+
+    assert chunks[0].text == (
+        "Queen pheromones signal the queen's presence."
+    )
+    assert chunks[1].text == "ANTENNAE TAPPING"
+    assert chunks[2].text == (
+        "Bees tap antennae to exchange information."
+    )
+
+    assert all(
+        "ANTENNAE TAPPING Bees tap" not in chunk.text
+        for chunk in chunks
+    )
+
+
+def test_overlap_stays_inside_long_paragraph() -> None:
+    page = ExtractedPage(
+        page_number=1,
+        source="sample.pdf",
+        text=(
+            "one two three four five six seven eight\n\n"
+            "separate paragraph remains independent"
+        ),
+    )
+
+    chunks = chunk_pages(
+        pages=[page],
+        chunk_size=5,
+        overlap=2,
+    )
+
+    assert chunks[0].text == (
+        "one two three four five"
+    )
+    assert chunks[1].text == (
+        "four five six seven eight"
+    )
+    assert chunks[2].text == (
+        "separate paragraph remains independent"
+    )
